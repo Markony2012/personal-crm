@@ -2704,15 +2704,18 @@
             for (let i = 0; i < attempts; i++) {
                 const r = await fetch(url);
                 if (r.ok) {
-                    const text = await r.text();
-                    // Filter out control chars (0-31 and 127) without using regex hex escapes,
-                    // which can confuse Babel-standalone's parser.
-                    let cleaned = '';
-                    for (let k = 0; k < text.length; k++) {
-                        const code = text.charCodeAt(k);
-                        cleaned += (code < 32 || code === 127) ? ' ' : text[k];
+                    const raw = await r.text();
+                    try {
+                        return JSON.parse(raw);
+                    } catch (parseErr) {
+                        // NCBI's JSON occasionally has unescaped control chars in string values.
+                        // Sanitize and retry.
+                        const cleaned = raw.split('').map(ch => {
+                            const code = ch.charCodeAt(0);
+                            return (code >= 32 && code !== 127) ? ch : ' ';
+                        }).join('');
+                        return JSON.parse(cleaned);
                     }
-                    return JSON.parse(cleaned);
                 }
                 if (r.status === 429 || r.status === 503) {
                     await sleep(1200 * (i + 1));
