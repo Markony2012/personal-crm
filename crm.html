@@ -2705,7 +2705,13 @@
                 const r = await fetch(url);
                 if (r.ok) {
                     const text = await r.text();
-                    const cleaned = text.replace(/[\x00-\x1F\x7F]/g, ' ');
+                    // Filter out control chars (0-31 and 127) without using regex hex escapes,
+                    // which can confuse Babel-standalone's parser.
+                    let cleaned = '';
+                    for (let k = 0; k < text.length; k++) {
+                        const code = text.charCodeAt(k);
+                        cleaned += (code < 32 || code === 127) ? ' ' : text[k];
+                    }
                     return JSON.parse(cleaned);
                 }
                 if (r.status === 429 || r.status === 503) {
