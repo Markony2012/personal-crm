@@ -2038,8 +2038,10 @@
                                 });
                             });
                             db._nextId = maxId + 1;
-                            // Write directly via storage._write
-                            localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+                            // Write through storage._write so the in-memory cache, localStorage,
+                            // and Firestore all get updated. Otherwise __cachedDb stays empty
+                            // and the UI re-reads stale data.
+                            storage._write(db);
                         } else {
                             for (const [store, records] of Object.entries(imported)) {
                                 if (Array.isArray(records) && STORES.includes(store)) {
