@@ -1814,6 +1814,35 @@
                 }
             };
 
+            // Complete a task. After marking it done, offer to create a follow-up task
+            // chained to the same contact / account / opportunity. The follow-up modal opens
+            // pre-filled so the user can adjust description + due date + commit.
+            const completeTask = async (taskId, { offerFollowUp = true } = {}) => {
+                const task = data.tasks.find(t => t.id === taskId);
+                if (!task) return;
+                await saveRecord('tasks', { ...task, completed: true, completedAt: new Date().toISOString() });
+                if (!offerFollowUp) return;
+                // Ask if the user wants to chain a follow-up.
+                if (!confirm('Task completed. Create a follow-up task linked to the same contact/account/opportunity?')) return;
+                // Default due date: one week from today (YYYY-MM-DD)
+                const dt = new Date();
+                dt.setDate(dt.getDate() + 7);
+                const due = dt.toISOString().split('T')[0];
+                setModal({
+                    type: 'task',
+                    data: {
+                        contactId: task.contactId || null,
+                        accountId: task.accountId || null,
+                        opportunityId: task.opportunityId || null,
+                        type: task.type || 'Follow-up',
+                        priority: task.priority || 'Medium',
+                        dueDate: due,
+                        description: `Follow-up: ${task.description || ''}`.trim(),
+                        recurring: 'none'
+                    }
+                });
+            };
+
             const saveQuickNote = (noteData) => {
                 try {
                     // Save activity
@@ -2151,12 +2180,7 @@
                                             getAccountName={getAccountName}
                                             getContactName={getContactName}
                                             setCurrentPage={setCurrentPage}
-                                            onCompleteTask={async (taskId) => {
-                                                const task = data.tasks.find(t => t.id === taskId);
-                                                if (task) {
-                                                    await saveRecord('tasks', { ...task, completed: true, completedAt: new Date().toISOString() });
-                                                }
-                                            }}
+                                            onCompleteTask={completeTask}
                                         />
                                     )}
                                     {currentPage === 'dashboard' && (
@@ -2174,12 +2198,7 @@
                                             onActivityClick={(activity) => setModal({ type: 'activity-detail', data: activity })}
                                             getContactName={getContactName}
                                             getAccountName={getAccountName}
-                                            onCompleteTask={async (taskId) => {
-                                                const task = data.tasks.find(t => t.id === taskId);
-                                                if (task) {
-                                                    await saveRecord('tasks', { ...task, completed: true, completedAt: new Date().toISOString() });
-                                                }
-                                            }}
+                                            onCompleteTask={completeTask}
                                         />
                                     )}
                                     {currentPage === 'pipeline' && (
@@ -2217,6 +2236,7 @@
                                             onEdit={(task) => setModal({ type: 'task-detail', data: task })}
                                             onDelete={(id) => deleteRecord('tasks', id)}
                                             onAddFollowUp={() => setModal({ type: 'quick-follow-up' })}
+                                            onCompleteTask={completeTask}
                                             getAccountName={getAccountName}
                                             getContactName={getContactName}
                                         />
@@ -3167,9 +3187,10 @@
         };
 
         // Tasks Component
-        const Tasks = ({ tasks, accounts, contacts, opportunities, onEdit, onDelete, onAddFollowUp, getAccountName, getContactName }) => {
+        const Tasks = ({ tasks, accounts, contacts, opportunities, onEdit, onDelete, onAddFollowUp, onCompleteTask, getAccountName, getContactName }) => {
             const [filterType, setFilterType] = useState('All');
             const [filterPriority, setFilterPriority] = useState('All');
+            const [showCompleted, setShowCompleted] = useState(false);
 
             const overdue = tasks.filter(t => !t.completed && new Date(t.dueDate) < new Date());
             const today = tasks.filter(t => !t.completed && t.dueDate === new Date().toISOString().split('T')[0]);
@@ -3190,6 +3211,9 @@
                 return dueDate > sevenDaysDate;
             }).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
             const noDate = tasks.filter(t => !t.completed && !t.dueDate);
+            const completed = tasks
+                .filter(t => t.completed)
+                .sort((a, b) => new Date(b.completedAt || 0) - new Date(a.completedAt || 0));
 
             const filtered = (list) => {
                 return list.filter(t => {
@@ -3209,11 +3233,54 @@
                         <ul className="task-list">
                             {filteredList.map(task => (
                                 <li key={task.id} className={`task-item ${taskList === overdue ? 'overdue' : ''}`}>
-                                    <input type="checkbox" style={{ cursor: 'pointer' }} />
+                                    <input
+                                        type="checkbox"
+                                        checked={!!task.completed}
+                                        style={{ cursor: 'pointer' }}
+                                        onChange={(e) => { e.stopPropagation(); if (onCompleteTask && !task.completed) onCompleteTask(task.id); }}
+                                    />
                                     <div className="task-content" onClick={() => onEdit(task)} style={{ cursor: 'pointer' }}>
                                         <div className="task-text">{task.description}</div>
                                         <div className="task-meta">
-                                            {task.type} • {new Date(task.dueDate).toLocaleDateString()} {task.dueTime && `at ${task.dueTime}`} • {task.contactId ? getContactName(task.contactId) : task.accountId ? getAccountName(task.accountId) : 'General'}
+                                            {task.type} • {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No date'} {task.dueTime && `at ${task.dueTime}`} • {task.contactId ? getContactName(task.contactId) : task.accountId ? getAccountName(task.accountId) : 'General'}
+                                        </div>
+                                    </div>
+                                    <span className={`priority-badge priority-${(task.priority || '').toLowerCase()}`}>
+                                        {task.priority || '—'}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                );
+            };
+
+            const renderCompletedList = () => {
+                const filteredList = filtered(completed);
+                if (filteredList.length === 0) {
+                    return (
+                        <div className="section">
+                            <div className="empty-state" style={{ padding: '20px' }}>
+                                <div>No completed tasks yet.</div>
+                            </div>
+                        </div>
+                    );
+                }
+                return (
+                    <div className="section">
+                        <ul className="task-list">
+                            {filteredList.map(task => (
+                                <li key={task.id} className="task-item" style={{ opacity: 0.65 }}>
+                                    <input
+                                        type="checkbox"
+                                        checked
+                                        style={{ cursor: 'pointer' }}
+                                        readOnly
+                                    />
+                                    <div className="task-content" onClick={() => onEdit(task)} style={{ cursor: 'pointer' }}>
+                                        <div className="task-text" style={{ textDecoration: 'line-through' }}>{task.description}</div>
+                                        <div className="task-meta">
+                                            {task.type} • Completed {task.completedAt ? new Date(task.completedAt).toLocaleDateString() : '—'} • {task.contactId ? getContactName(task.contactId) : task.accountId ? getAccountName(task.accountId) : 'General'}
                                         </div>
                                     </div>
                                     <span className={`priority-badge priority-${(task.priority || '').toLowerCase()}`}>
@@ -3253,13 +3320,31 @@
                         </select>
                         <button className="btn small" onClick={onAddFollowUp}>+ Add Follow-up</button>
                         <button className="btn small secondary" onClick={() => exportToCalendar(tasks.filter(t => !t.completed))}>Export to Calendar (.ics)</button>
+                        <button
+                            className="btn small secondary"
+                            onClick={() => setShowCompleted(s => !s)}
+                            style={{ marginLeft: 'auto' }}
+                        >
+                            {showCompleted ? 'Hide Completed' : `Show Completed (${completed.length})`}
+                        </button>
                     </div>
 
-                    {renderTaskList(overdue, 'Overdue Tasks')}
-                    {renderTaskList(today, 'Today\'s Tasks')}
-                    {renderTaskList(upcoming, 'Upcoming (Next 7 Days)')}
-                    {renderTaskList(later, 'Later (8+ Days Out)')}
-                    {renderTaskList(noDate, 'No Due Date')}
+                    {!showCompleted && (
+                        <React.Fragment>
+                            {renderTaskList(overdue, 'Overdue Tasks')}
+                            {renderTaskList(today, 'Today\'s Tasks')}
+                            {renderTaskList(upcoming, 'Upcoming (Next 7 Days)')}
+                            {renderTaskList(later, 'Later (8+ Days Out)')}
+                            {renderTaskList(noDate, 'No Due Date')}
+                        </React.Fragment>
+                    )}
+
+                    {showCompleted && (
+                        <React.Fragment>
+                            <div className="section-title" style={{ marginTop: 0 }}>Completed</div>
+                            {renderCompletedList()}
+                        </React.Fragment>
+                    )}
 
                     {tasks.length === 0 && (
                         <div className="section">
