@@ -2190,7 +2190,7 @@
                                         setSearchTerm('');
                                         setModal({ type: 'contact-detail', data: item });
                                     } else if (type === 'opportunity') {
-                                        setCurrentPage('pipeline');
+                                        setCurrentPage('home');
                                         setSearchTerm('');
                                         setModal({ type: 'opportunity-detail', data: item });
                                     }
@@ -2198,44 +2198,42 @@
                             ) : (
                                 <>
                                     {currentPage === 'home' && (
-                                        <Home
-                                            tasks={data.tasks}
-                                            accounts={data.accounts}
-                                            activities={data.activities}
-                                            opportunities={data.opportunities}
-                                            onTaskClick={(task) => setModal({ type: 'task-detail', data: task })}
-                                            onActivityClick={(activity) => setModal({ type: 'activity-detail', data: activity })}
-                                            getAccountName={getAccountName}
-                                            getContactName={getContactName}
-                                            setCurrentPage={setCurrentPage}
-                                            onCompleteTask={completeTask}
-                                        />
-                                    )}
-                                    {currentPage === 'dashboard' && (
-                                        <Dashboard
-                                            overdueTasks={getOverdueTasks()}
-                                            todayTasks={getTodayTasks()}
-                                            upcomingTasks={getUpcomingTasks()}
-                                            recentActivities={getRecentActivities()}
-                                            totalPipeline={getTotalPipelineValue()}
-                                            weightedPipeline={getWeightedPipelineValue()}
-                                            opportunitiesByStage={getOpportunitiesByStage()}
-                                            accounts={data.accounts}
-                                            opportunities={data.opportunities}
-                                            onTaskClick={(task) => setModal({ type: 'task-detail', data: task })}
-                                            onActivityClick={(activity) => setModal({ type: 'activity-detail', data: activity })}
-                                            getContactName={getContactName}
-                                            getAccountName={getAccountName}
-                                            onCompleteTask={completeTask}
-                                        />
-                                    )}
-                                    {currentPage === 'pipeline' && (
-                                        <Pipeline
-                                            opportunities={data.opportunities}
-                                            accounts={data.accounts}
-                                            onEdit={(opp) => setModal({ type: 'opportunity-detail', data: opp })}
-                                            onDelete={(id) => deleteRecord('opportunities', id)}
-                                        />
+                                        <React.Fragment>
+                                            <Home
+                                                tasks={data.tasks}
+                                                accounts={data.accounts}
+                                                activities={data.activities}
+                                                opportunities={data.opportunities}
+                                                onTaskClick={(task) => setModal({ type: 'task-detail', data: task })}
+                                                onActivityClick={(activity) => setModal({ type: 'activity-detail', data: activity })}
+                                                getAccountName={getAccountName}
+                                                getContactName={getContactName}
+                                                setCurrentPage={setCurrentPage}
+                                                onCompleteTask={completeTask}
+                                            />
+                                            <Dashboard
+                                                overdueTasks={getOverdueTasks()}
+                                                todayTasks={getTodayTasks()}
+                                                upcomingTasks={getUpcomingTasks()}
+                                                recentActivities={getRecentActivities()}
+                                                totalPipeline={getTotalPipelineValue()}
+                                                weightedPipeline={getWeightedPipelineValue()}
+                                                opportunitiesByStage={getOpportunitiesByStage()}
+                                                accounts={data.accounts}
+                                                opportunities={data.opportunities}
+                                                onTaskClick={(task) => setModal({ type: 'task-detail', data: task })}
+                                                onActivityClick={(activity) => setModal({ type: 'activity-detail', data: activity })}
+                                                getContactName={getContactName}
+                                                getAccountName={getAccountName}
+                                                onCompleteTask={completeTask}
+                                            />
+                                            <Pipeline
+                                                opportunities={data.opportunities}
+                                                accounts={data.accounts}
+                                                onEdit={(opp) => setModal({ type: 'opportunity-detail', data: opp })}
+                                                onDelete={(id) => deleteRecord('opportunities', id)}
+                                            />
+                                        </React.Fragment>
                                     )}
                                     {currentPage === 'accounts' && (
                                         <Accounts
@@ -2335,19 +2333,7 @@
                             className={`nav-item ${currentPage === 'home' ? 'active' : ''}`}
                             onClick={() => setCurrentPage('home')}
                         >
-                            Home
-                        </div>
-                        <div
-                            className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
-                            onClick={() => setCurrentPage('dashboard')}
-                        >
                             Dashboard
-                        </div>
-                        <div
-                            className={`nav-item ${currentPage === 'pipeline' ? 'active' : ''}`}
-                            onClick={() => setCurrentPage('pipeline')}
-                        >
-                            Pipeline
                         </div>
                         <div
                             className={`nav-item ${currentPage === 'accounts' ? 'active' : ''}`}
@@ -2804,7 +2790,7 @@
         const Dashboard = ({ overdueTasks, todayTasks, upcomingTasks, recentActivities, totalPipeline, weightedPipeline, opportunitiesByStage, accounts, opportunities, onTaskClick, onActivityClick, getContactName, getAccountName, onCompleteTask }) => {
             return (
                 <div>
-                    <div className="page-title">Dashboard</div>
+                    <div className="page-title" style={{ fontSize: 24, marginTop: 32, paddingTop: 16, borderTop: '1px solid var(--color-divider)' }}>Pipeline Overview</div>
 
                     <div className="dashboard-grid">
                         <div className="stat-card pipeline">
@@ -2959,7 +2945,7 @@
 
             return (
                 <div>
-                    <div className="page-title">Pipeline</div>
+                    <div className="page-title" style={{ fontSize: 24, marginTop: 32, paddingTop: 16, borderTop: '1px solid var(--color-divider)' }}>Opportunities</div>
 
                     <div className="filter-tabs">
                         <div
