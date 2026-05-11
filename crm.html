@@ -1791,6 +1791,20 @@
 
             const saveRecord = (storeName, record) => {
                 try {
+                    // Detect a task transitioning from not-completed to completed.
+                    // We need to know the previous state BEFORE we write the new one.
+                    let triggerFollowUp = false;
+                    let triggerRecord = null;
+                    if (storeName === 'tasks' && record.completed && record.id) {
+                        const prev = data.tasks.find(t => t.id === record.id);
+                        if (prev && !prev.completed) {
+                            triggerFollowUp = true;
+                            triggerRecord = record;
+                            // Stamp completion time if missing
+                            if (!record.completedAt) record.completedAt = new Date().toISOString();
+                        }
+                    }
+
                     if (record.id) {
                         storage.update(storeName, record);
                     } else {
@@ -1798,6 +1812,29 @@
                     }
                     refreshData();
                     setModal(null);
+
+                    if (triggerFollowUp) {
+                        // Use a microtask so the modal-close finishes before we open a new one.
+                        setTimeout(() => {
+                            if (!confirm('Task completed. Create a follow-up task linked to the same contact/account/opportunity?')) return;
+                            const dt = new Date();
+                            dt.setDate(dt.getDate() + 7);
+                            const due = dt.toISOString().split('T')[0];
+                            setModal({
+                                type: 'task',
+                                data: {
+                                    contactId: triggerRecord.contactId || null,
+                                    accountId: triggerRecord.accountId || null,
+                                    opportunityId: triggerRecord.opportunityId || null,
+                                    type: triggerRecord.type || 'Follow-up',
+                                    priority: triggerRecord.priority || 'Medium',
+                                    dueDate: due,
+                                    description: `Follow-up: ${triggerRecord.description || ''}`.trim(),
+                                    recurring: 'none'
+                                }
+                            });
+                        }, 0);
+                    }
                 } catch (err) {
                     console.error('Error saving record:', err);
                 }
@@ -4491,13 +4528,14 @@
                                     </select>
                                 </div>
                                 <div className="form-group">
-                                    <label>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 0, cursor: 'pointer' }}>
                                         <input
                                             type="checkbox"
                                             checked={formData.completed || false}
                                             onChange={(e) => handleChange('completed', e.target.checked)}
+                                            style={{ width: 'auto', margin: 0, cursor: 'pointer' }}
                                         />
-                                        {' '}Mark as completed
+                                        Mark as completed
                                     </label>
                                 </div>
                                 <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
