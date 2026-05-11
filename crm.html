@@ -3454,8 +3454,10 @@
         };
 
         // Weekly Report Component
-        // Builds a Mon-Fri this-week summary for Michael. Each item has an include checkbox.
+        // Builds a region/account-grouped narrative draft for Michael. User edits the textarea
+        // directly to refine bullets into narrative voice. "Reset draft" regenerates from data.
         const WeeklyReport = ({ tasks, activities, opportunities, accounts, contacts, getAccountName, getContactName }) => {
+            // === Week range: Mon-Fri this week ===
             const todayDate = new Date();
             const day = todayDate.getDay();
             const daysToMonday = (day === 0) ? 6 : day - 1;
@@ -3482,222 +3484,200 @@
                 return d >= nextMonday && d <= nextFriday;
             };
 
-            const completedTasks = tasks
-                .filter(t => t.completed && inThisWeek(t.completedAt))
-                .sort((a, b) => new Date(a.completedAt) - new Date(b.completedAt));
-            const meetingsAndVisits = activities
-                .filter(a => inThisWeek(a.date) && (a.type === 'Meeting' || a.type === 'Visit' || a.type === 'Demo'))
-                .sort((a, b) => new Date(a.date) - new Date(b.date));
-            const opportunityUpdates = opportunities
-                .filter(o => inThisWeek(o.updatedAt) || inThisWeek(o.createdAt))
-                .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
-            const notes = activities
-                .filter(a => inThisWeek(a.date) && a.type === 'Note')
-                .sort((a, b) => new Date(a.date) - new Date(b.date));
-            const nextWeekPlan = tasks
-                .filter(t => !t.completed && inNextWeek(t.dueDate))
-                .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-
-            const [excluded, setExcluded] = useState(() => new Set());
-            const [copied, setCopied] = useState(false);
-            const toggle = (key) => {
-                setExcluded(prev => {
-                    const next = new Set(prev);
-                    if (next.has(key)) next.delete(key); else next.add(key);
-                    return next;
-                });
-            };
-            const isIncluded = (key) => !excluded.has(key);
-
             const fmt = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-            const rangeLabel = `${fmt(monday)} - ${fmt(friday)}`;
-            const nextRangeLabel = `${fmt(nextMonday)} - ${fmt(nextFriday)}`;
+            const rangeLabel = fmt(monday) + ' - ' + fmt(friday);
+            const nextRangeLabel = fmt(nextMonday) + ' - ' + fmt(nextFriday);
 
-            const buildReport = () => {
-                const lines = [];
-                lines.push(`Weekly Update - ${rangeLabel}`);
-                lines.push('');
-                const completedIncluded = completedTasks.filter(t => isIncluded(`task-${t.id}`));
-                if (completedIncluded.length > 0) {
-                    lines.push('TASKS COMPLETED');
-                    completedIncluded.forEach(t => {
-                        const ctx = t.accountId ? ` (${getAccountName(t.accountId)})` : '';
-                        lines.push(`- ${t.description}${ctx}`);
-                    });
-                    lines.push('');
-                }
-                const meetingsIncluded = meetingsAndVisits.filter(a => isIncluded(`meeting-${a.id}`));
-                if (meetingsIncluded.length > 0) {
-                    lines.push('MEETINGS & VISITS');
-                    meetingsIncluded.forEach(a => {
-                        const acct = a.accountId ? getAccountName(a.accountId) : '';
-                        const contact = a.contactId ? getContactName(a.contactId) : '';
-                        const who = [acct, contact].filter(Boolean).join(' / ');
-                        lines.push(`- ${new Date(a.date).toLocaleDateString()} - ${a.type}${who ? ` with ${who}` : ''}: ${a.description}`);
-                    });
-                    lines.push('');
-                }
-                const oppsIncluded = opportunityUpdates.filter(o => isIncluded(`opp-${o.id}`));
-                if (oppsIncluded.length > 0) {
-                    lines.push('OPPORTUNITY DEVELOPMENTS');
-                    oppsIncluded.forEach(o => {
-                        const value = o.value ? ` ($${o.value.toLocaleString()})` : '';
-                        lines.push(`- ${o.name} - ${o.stage}${value}`);
-                    });
-                    lines.push('');
-                }
-                const notesIncluded = notes.filter(a => isIncluded(`note-${a.id}`));
-                if (notesIncluded.length > 0) {
-                    lines.push('NOTES');
-                    notesIncluded.forEach(a => {
-                        const acct = a.accountId ? getAccountName(a.accountId) : '';
-                        lines.push(`- ${acct ? acct + ': ' : ''}${a.description}`);
-                    });
-                    lines.push('');
-                }
-                const planIncluded = nextWeekPlan.filter(t => isIncluded(`plan-${t.id}`));
-                if (planIncluded.length > 0) {
-                    lines.push(`NEXT WEEK (${nextRangeLabel})`);
-                    planIncluded.forEach(t => {
-                        const ctx = t.accountId ? ` (${getAccountName(t.accountId)})` : '';
-                        const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '';
-                        lines.push(`- ${due} - ${t.description}${ctx}`);
-                    });
-                    lines.push('');
-                }
-                return lines.join('\n').trim();
+            // === Pull this week's activity ===
+            const completedTasks = tasks.filter(t => t.completed && inThisWeek(t.completedAt));
+            const meetingsAndVisits = activities.filter(a => inThisWeek(a.date) && (a.type === 'Meeting' || a.type === 'Visit' || a.type === 'Demo'));
+            const notes = activities.filter(a => inThisWeek(a.date) && a.type === 'Note');
+            const opportunityUpdates = opportunities.filter(o => inThisWeek(o.updatedAt) || inThisWeek(o.createdAt));
+            const nextWeekPlan = tasks.filter(t => !t.completed && inNextWeek(t.dueDate));
+
+            // === Group by account ===
+            // Each entry has the account id and a list of narrative bullet strings.
+            const byAccount = new Map();
+            const ensureAccount = (accountId) => {
+                if (!byAccount.has(accountId)) byAccount.set(accountId, []);
+                return byAccount.get(accountId);
             };
+
+            completedTasks.forEach(t => {
+                const bullets = ensureAccount(t.accountId || 'none');
+                const who = t.contactId ? getContactName(t.contactId) : '';
+                const prefix = who ? who + ': ' : '';
+                bullets.push(prefix + t.description);
+            });
+            meetingsAndVisits.forEach(a => {
+                const bullets = ensureAccount(a.accountId || 'none');
+                const who = a.contactId ? getContactName(a.contactId) : '';
+                const label = a.type === 'Meeting' ? 'Met' : (a.type === 'Visit' ? 'Visited' : 'Demoed');
+                if (who) {
+                    bullets.push(label + ' ' + who + ': ' + (a.description || ''));
+                } else {
+                    bullets.push(label + ': ' + (a.description || ''));
+                }
+            });
+            notes.forEach(a => {
+                const bullets = ensureAccount(a.accountId || 'none');
+                bullets.push(a.description || '(note)');
+            });
+            opportunityUpdates.forEach(o => {
+                const bullets = ensureAccount(o.accountId || 'none');
+                const value = o.value ? ' ($' + o.value.toLocaleString() + ')' : '';
+                bullets.push(o.name + ' - currently at ' + o.stage + value);
+            });
+
+            // === Group accounts by region ===
+            const byRegion = new Map();
+            byAccount.forEach((bullets, accountId) => {
+                const acct = accountId === 'none' ? null : accounts.find(a => a.id === accountId);
+                const region = acct ? (acct.region || 'Other') : 'Unassigned';
+                if (!byRegion.has(region)) byRegion.set(region, []);
+                byRegion.get(region).push({ accountId, account: acct, bullets });
+            });
+
+            // === Next week plan by account ===
+            const planByAccount = new Map();
+            nextWeekPlan.forEach(t => {
+                const k = t.accountId || 'none';
+                if (!planByAccount.has(k)) planByAccount.set(k, []);
+                const dueLabel = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+                const who = t.contactId ? getContactName(t.contactId) : '';
+                const ctx = who ? ' (' + who + ')' : '';
+                planByAccount.get(k).push((dueLabel ? dueLabel + ' - ' : '') + t.description + ctx);
+            });
+
+            // === Build the starter draft ===
+            const buildStarterDraft = () => {
+                const lines = [];
+                lines.push("Please find below a summary of this week's activities across my region:");
+                lines.push('');
+
+                // Sort regions: known REGIONS order first, then Other/Unassigned at end
+                const regionOrder = (typeof REGIONS !== 'undefined' ? REGIONS : []).concat(['Other', 'Unassigned']);
+                const sortedRegions = Array.from(byRegion.keys()).sort((a, b) => {
+                    const ia = regionOrder.indexOf(a);
+                    const ib = regionOrder.indexOf(b);
+                    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+                });
+
+                sortedRegions.forEach(region => {
+                    const items = byRegion.get(region);
+                    if (!items || items.length === 0) return;
+                    lines.push('=== ' + region.toUpperCase() + ' ===');
+                    lines.push('');
+                    // Sort accounts alphabetically within region
+                    items.sort((x, y) => {
+                        const nx = x.account ? x.account.name : 'zzz Unassigned';
+                        const ny = y.account ? y.account.name : 'zzz Unassigned';
+                        return nx.localeCompare(ny);
+                    });
+                    items.forEach(({ account, bullets }) => {
+                        const name = account ? account.name : 'Unassigned (no account)';
+                        lines.push(name);
+                        bullets.forEach(b => lines.push('  - ' + b));
+                        lines.push('');
+                    });
+                });
+
+                // Next week section
+                if (planByAccount.size > 0) {
+                    lines.push('=== NEXT WEEK (' + nextRangeLabel + ') ===');
+                    lines.push('');
+                    const planEntries = Array.from(planByAccount.entries()).sort((a, b) => {
+                        const na = a[0] === 'none' ? 'zzz' : (accounts.find(x => x.id === a[0])?.name || 'zzz');
+                        const nb = b[0] === 'none' ? 'zzz' : (accounts.find(x => x.id === b[0])?.name || 'zzz');
+                        return na.localeCompare(nb);
+                    });
+                    planEntries.forEach(([accountId, bullets]) => {
+                        const acct = accountId === 'none' ? null : accounts.find(a => a.id === accountId);
+                        lines.push(acct ? acct.name : 'Unassigned');
+                        bullets.forEach(b => lines.push('  - ' + b));
+                        lines.push('');
+                    });
+                }
+
+                return lines.join('\n').trimEnd();
+            };
+
+            // Draft state: starter draft on mount; user can edit freely.
+            const [draft, setDraft] = useState(buildStarterDraft);
+            const [copied, setCopied] = useState(false);
+            const [confirmReset, setConfirmReset] = useState(false);
 
             const copyToClipboard = async () => {
                 try {
-                    await navigator.clipboard.writeText(buildReport());
+                    await navigator.clipboard.writeText(draft);
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
                 } catch (err) {
-                    alert('Copy failed. Select and copy manually from the preview.');
+                    alert('Copy failed. Select the text manually and copy.');
                 }
             };
 
-            const itemRow = (key, label, sub) => (
-                <li key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--color-divider)' }}>
-                    <input
-                        type="checkbox"
-                        checked={isIncluded(key)}
-                        onChange={() => toggle(key)}
-                        style={{ cursor: 'pointer', marginTop: 3, flexShrink: 0 }}
-                    />
-                    <div style={{ flex: 1, opacity: isIncluded(key) ? 1 : 0.4 }}>
-                        <div style={{ fontSize: 14 }}>{label}</div>
-                        {sub && <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2 }}>{sub}</div>}
-                    </div>
-                </li>
-            );
+            const resetDraft = () => {
+                if (!confirmReset) {
+                    setConfirmReset(true);
+                    setTimeout(() => setConfirmReset(false), 3000);
+                    return;
+                }
+                setDraft(buildStarterDraft());
+                setConfirmReset(false);
+            };
 
-            const reportText = buildReport();
-            const hasAnything = completedTasks.length + meetingsAndVisits.length + opportunityUpdates.length + notes.length + nextWeekPlan.length > 0;
+            const hasAnything = completedTasks.length + meetingsAndVisits.length + notes.length + opportunityUpdates.length + nextWeekPlan.length > 0;
 
             return (
                 <div>
                     <div className="page-title">Weekly Report</div>
-                    <div style={{ fontSize: 14, color: 'var(--color-muted)', marginBottom: 20 }}>
-                        Mon-Fri this week ({rangeLabel}). Uncheck items you do not want to include, then Copy.
+                    <div style={{ fontSize: 14, color: 'var(--color-muted)', marginBottom: 8 }}>
+                        Mon-Fri this week ({rangeLabel}). Edit the draft below in narrative style, then copy.
                     </div>
-                    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                        <div style={{ flex: '1 1 480px', minWidth: 0 }}>
-                            {completedTasks.length > 0 && (
-                                <div className="section">
-                                    <div className="section-title">Tasks Completed ({completedTasks.length})</div>
-                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                        {completedTasks.map(t => itemRow(
-                                            `task-${t.id}`,
-                                            t.description,
-                                            `${t.type || ''} - Completed ${t.completedAt ? new Date(t.completedAt).toLocaleDateString() : ''} ${t.accountId ? '- ' + getAccountName(t.accountId) : ''}`
-                                        ))}
-                                    </ul>
+                    {!hasAnything && (
+                        <div className="section" style={{ marginBottom: 16 }}>
+                            <div className="empty-state">
+                                <div>Nothing logged for this week yet.</div>
+                                <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 8 }}>
+                                    Complete tasks, log meetings/visits/notes, and update opportunities to populate the draft.
                                 </div>
-                            )}
-                            {meetingsAndVisits.length > 0 && (
-                                <div className="section">
-                                    <div className="section-title">Meetings & Visits ({meetingsAndVisits.length})</div>
-                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                        {meetingsAndVisits.map(a => itemRow(
-                                            `meeting-${a.id}`,
-                                            a.description,
-                                            `${new Date(a.date).toLocaleDateString()} - ${a.type} ${a.accountId ? '- ' + getAccountName(a.accountId) : ''} ${a.contactId ? '- ' + getContactName(a.contactId) : ''}`
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            {opportunityUpdates.length > 0 && (
-                                <div className="section">
-                                    <div className="section-title">Opportunity Developments ({opportunityUpdates.length})</div>
-                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                        {opportunityUpdates.map(o => itemRow(
-                                            `opp-${o.id}`,
-                                            o.name,
-                                            `${o.stage} ${o.value ? '- $' + o.value.toLocaleString() : ''}`
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            {notes.length > 0 && (
-                                <div className="section">
-                                    <div className="section-title">Notes ({notes.length})</div>
-                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                        {notes.map(a => itemRow(
-                                            `note-${a.id}`,
-                                            a.description,
-                                            `${new Date(a.date).toLocaleDateString()} ${a.accountId ? '- ' + getAccountName(a.accountId) : ''}`
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            {nextWeekPlan.length > 0 && (
-                                <div className="section">
-                                    <div className="section-title">Next Week Plan ({nextWeekPlan.length})</div>
-                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                        {nextWeekPlan.map(t => itemRow(
-                                            `plan-${t.id}`,
-                                            t.description,
-                                            `Due ${t.dueDate ? new Date(t.dueDate).toLocaleDateString() : ''} ${t.accountId ? '- ' + getAccountName(t.accountId) : ''}`
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                            {!hasAnything && (
-                                <div className="section">
-                                    <div className="empty-state">
-                                        <div>Nothing logged for this week yet.</div>
-                                        <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 8 }}>
-                                            Complete tasks, log meetings/notes, and update opportunities - they will show up here.
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <div style={{ flex: '0 0 420px', position: 'sticky', top: 20 }}>
-                            <div className="section">
-                                <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span>Preview</span>
-                                    <button className="btn small" onClick={copyToClipboard}>
-                                        {copied ? 'Copied!' : 'Copy to clipboard'}
-                                    </button>
-                                </div>
-                                <pre style={{
-                                    whiteSpace: 'pre-wrap',
-                                    fontFamily: 'var(--font-sans)',
-                                    fontSize: 13,
-                                    lineHeight: 1.5,
-                                    background: 'var(--color-surface-soft)',
-                                    padding: 14,
-                                    borderRadius: 'var(--radius-sm)',
-                                    border: '1px solid var(--color-divider)',
-                                    maxHeight: '70vh',
-                                    overflowY: 'auto',
-                                    margin: 0
-                                }}>{reportText || '(Nothing selected.)'}</pre>
                             </div>
                         </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+                        <button className="btn small" onClick={copyToClipboard}>
+                            {copied ? 'Copied!' : 'Copy to clipboard'}
+                        </button>
+                        <button className="btn small secondary" onClick={resetDraft}>
+                            {confirmReset ? 'Click again to confirm reset' : 'Reset draft from data'}
+                        </button>
+                        <div style={{ flex: 1 }} />
+                        <div style={{ fontSize: 12, color: 'var(--color-muted)', alignSelf: 'center' }}>
+                            {draft.split('\n').length} lines / {draft.length} chars
+                        </div>
+                    </div>
+                    <div className="section" style={{ padding: 0 }}>
+                        <textarea
+                            value={draft}
+                            onChange={e => setDraft(e.target.value)}
+                            spellCheck={true}
+                            style={{
+                                width: '100%',
+                                minHeight: '70vh',
+                                padding: 18,
+                                fontFamily: 'var(--font-sans)',
+                                fontSize: 14,
+                                lineHeight: 1.6,
+                                border: 'none',
+                                borderRadius: 'var(--radius-sm)',
+                                resize: 'vertical',
+                                background: 'var(--color-surface)',
+                                color: 'var(--color-text)',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                            }}
+                        />
                     </div>
                 </div>
             );
