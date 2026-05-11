@@ -1080,7 +1080,6 @@
             font-family: Georgia, 'Times New Roman', serif;
         }
 
-
         /* ==================== Task context hover ==================== */
         .task-context-wrap {
             position: relative;
@@ -1792,7 +1791,6 @@
             const saveRecord = (storeName, record) => {
                 try {
                     // Detect a task transitioning from not-completed to completed.
-                    // We need to know the previous state BEFORE we write the new one.
                     let triggerFollowUp = false;
                     let triggerRecord = null;
                     if (storeName === 'tasks' && record.completed && record.id) {
@@ -1800,11 +1798,9 @@
                         if (prev && !prev.completed) {
                             triggerFollowUp = true;
                             triggerRecord = record;
-                            // Stamp completion time if missing
                             if (!record.completedAt) record.completedAt = new Date().toISOString();
                         }
                     }
-
                     if (record.id) {
                         storage.update(storeName, record);
                     } else {
@@ -1812,9 +1808,7 @@
                     }
                     refreshData();
                     setModal(null);
-
                     if (triggerFollowUp) {
-                        // Use a microtask so the modal-close finishes before we open a new one.
                         setTimeout(() => {
                             if (!confirm('Task completed. Create a follow-up task linked to the same contact/account/opportunity?')) return;
                             const dt = new Date();
@@ -1852,16 +1846,13 @@
             };
 
             // Complete a task. After marking it done, offer to create a follow-up task
-            // chained to the same contact / account / opportunity. The follow-up modal opens
-            // pre-filled so the user can adjust description + due date + commit.
+            // chained to the same contact / account / opportunity.
             const completeTask = async (taskId, { offerFollowUp = true } = {}) => {
                 const task = data.tasks.find(t => t.id === taskId);
                 if (!task) return;
                 await saveRecord('tasks', { ...task, completed: true, completedAt: new Date().toISOString() });
                 if (!offerFollowUp) return;
-                // Ask if the user wants to chain a follow-up.
                 if (!confirm('Task completed. Create a follow-up task linked to the same contact/account/opportunity?')) return;
-                // Default due date: one week from today (YYYY-MM-DD)
                 const dt = new Date();
                 dt.setDate(dt.getDate() + 7);
                 const due = dt.toISOString().split('T')[0];
@@ -2298,6 +2289,17 @@
                                             }}
                                         />
                                     )}
+                                    {currentPage === 'report' && (
+                                        <WeeklyReport
+                                            tasks={data.tasks}
+                                            activities={data.activities}
+                                            opportunities={data.opportunities}
+                                            accounts={data.accounts}
+                                            contacts={data.contacts}
+                                            getAccountName={getAccountName}
+                                            getContactName={getContactName}
+                                        />
+                                    )}
                                 </>
                             )}
                         </div>
@@ -2376,6 +2378,12 @@
                             onClick={() => setCurrentPage('territories')}
                         >
                             Territories
+                        </div>
+                        <div
+                            className={`nav-item ${currentPage === 'report' ? 'active' : ''}`}
+                            onClick={() => setCurrentPage('report')}
+                        >
+                            Weekly Report
                         </div>
                     </div>
                     <div className="sidebar-footer">
@@ -3308,12 +3316,7 @@
                         <ul className="task-list">
                             {filteredList.map(task => (
                                 <li key={task.id} className="task-item" style={{ opacity: 0.65 }}>
-                                    <input
-                                        type="checkbox"
-                                        checked
-                                        style={{ cursor: 'pointer' }}
-                                        readOnly
-                                    />
+                                    <input type="checkbox" checked style={{ cursor: 'pointer' }} readOnly />
                                     <div className="task-content" onClick={() => onEdit(task)} style={{ cursor: 'pointer' }}>
                                         <div className="task-text" style={{ textDecoration: 'line-through' }}>{task.description}</div>
                                         <div className="task-meta">
@@ -3446,6 +3449,256 @@
                             ))}
                         </div>
                     )}
+                </div>
+            );
+        };
+
+        // Weekly Report Component
+        // Builds a Mon-Fri this-week summary for Michael. Each item has an include checkbox.
+        const WeeklyReport = ({ tasks, activities, opportunities, accounts, contacts, getAccountName, getContactName }) => {
+            const todayDate = new Date();
+            const day = todayDate.getDay();
+            const daysToMonday = (day === 0) ? 6 : day - 1;
+            const monday = new Date(todayDate);
+            monday.setHours(0, 0, 0, 0);
+            monday.setDate(monday.getDate() - daysToMonday);
+            const friday = new Date(monday);
+            friday.setDate(friday.getDate() + 4);
+            friday.setHours(23, 59, 59, 999);
+            const nextMonday = new Date(monday);
+            nextMonday.setDate(nextMonday.getDate() + 7);
+            const nextFriday = new Date(nextMonday);
+            nextFriday.setDate(nextFriday.getDate() + 4);
+            nextFriday.setHours(23, 59, 59, 999);
+
+            const inThisWeek = (dateStr) => {
+                if (!dateStr) return false;
+                const d = new Date(dateStr);
+                return d >= monday && d <= friday;
+            };
+            const inNextWeek = (dateStr) => {
+                if (!dateStr) return false;
+                const d = new Date(dateStr);
+                return d >= nextMonday && d <= nextFriday;
+            };
+
+            const completedTasks = tasks
+                .filter(t => t.completed && inThisWeek(t.completedAt))
+                .sort((a, b) => new Date(a.completedAt) - new Date(b.completedAt));
+            const meetingsAndVisits = activities
+                .filter(a => inThisWeek(a.date) && (a.type === 'Meeting' || a.type === 'Visit' || a.type === 'Demo'))
+                .sort((a, b) => new Date(a.date) - new Date(b.date));
+            const opportunityUpdates = opportunities
+                .filter(o => inThisWeek(o.updatedAt) || inThisWeek(o.createdAt))
+                .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+            const notes = activities
+                .filter(a => inThisWeek(a.date) && a.type === 'Note')
+                .sort((a, b) => new Date(a.date) - new Date(b.date));
+            const nextWeekPlan = tasks
+                .filter(t => !t.completed && inNextWeek(t.dueDate))
+                .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+            const [excluded, setExcluded] = useState(() => new Set());
+            const [copied, setCopied] = useState(false);
+            const toggle = (key) => {
+                setExcluded(prev => {
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key); else next.add(key);
+                    return next;
+                });
+            };
+            const isIncluded = (key) => !excluded.has(key);
+
+            const fmt = (d) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const rangeLabel = `${fmt(monday)} - ${fmt(friday)}`;
+            const nextRangeLabel = `${fmt(nextMonday)} - ${fmt(nextFriday)}`;
+
+            const buildReport = () => {
+                const lines = [];
+                lines.push(`Weekly Update - ${rangeLabel}`);
+                lines.push('');
+                const completedIncluded = completedTasks.filter(t => isIncluded(`task-${t.id}`));
+                if (completedIncluded.length > 0) {
+                    lines.push('TASKS COMPLETED');
+                    completedIncluded.forEach(t => {
+                        const ctx = t.accountId ? ` (${getAccountName(t.accountId)})` : '';
+                        lines.push(`- ${t.description}${ctx}`);
+                    });
+                    lines.push('');
+                }
+                const meetingsIncluded = meetingsAndVisits.filter(a => isIncluded(`meeting-${a.id}`));
+                if (meetingsIncluded.length > 0) {
+                    lines.push('MEETINGS & VISITS');
+                    meetingsIncluded.forEach(a => {
+                        const acct = a.accountId ? getAccountName(a.accountId) : '';
+                        const contact = a.contactId ? getContactName(a.contactId) : '';
+                        const who = [acct, contact].filter(Boolean).join(' / ');
+                        lines.push(`- ${new Date(a.date).toLocaleDateString()} - ${a.type}${who ? ` with ${who}` : ''}: ${a.description}`);
+                    });
+                    lines.push('');
+                }
+                const oppsIncluded = opportunityUpdates.filter(o => isIncluded(`opp-${o.id}`));
+                if (oppsIncluded.length > 0) {
+                    lines.push('OPPORTUNITY DEVELOPMENTS');
+                    oppsIncluded.forEach(o => {
+                        const value = o.value ? ` ($${o.value.toLocaleString()})` : '';
+                        lines.push(`- ${o.name} - ${o.stage}${value}`);
+                    });
+                    lines.push('');
+                }
+                const notesIncluded = notes.filter(a => isIncluded(`note-${a.id}`));
+                if (notesIncluded.length > 0) {
+                    lines.push('NOTES');
+                    notesIncluded.forEach(a => {
+                        const acct = a.accountId ? getAccountName(a.accountId) : '';
+                        lines.push(`- ${acct ? acct + ': ' : ''}${a.description}`);
+                    });
+                    lines.push('');
+                }
+                const planIncluded = nextWeekPlan.filter(t => isIncluded(`plan-${t.id}`));
+                if (planIncluded.length > 0) {
+                    lines.push(`NEXT WEEK (${nextRangeLabel})`);
+                    planIncluded.forEach(t => {
+                        const ctx = t.accountId ? ` (${getAccountName(t.accountId)})` : '';
+                        const due = t.dueDate ? new Date(t.dueDate).toLocaleDateString() : '';
+                        lines.push(`- ${due} - ${t.description}${ctx}`);
+                    });
+                    lines.push('');
+                }
+                return lines.join('\n').trim();
+            };
+
+            const copyToClipboard = async () => {
+                try {
+                    await navigator.clipboard.writeText(buildReport());
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                } catch (err) {
+                    alert('Copy failed. Select and copy manually from the preview.');
+                }
+            };
+
+            const itemRow = (key, label, sub) => (
+                <li key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--color-divider)' }}>
+                    <input
+                        type="checkbox"
+                        checked={isIncluded(key)}
+                        onChange={() => toggle(key)}
+                        style={{ cursor: 'pointer', marginTop: 3, flexShrink: 0 }}
+                    />
+                    <div style={{ flex: 1, opacity: isIncluded(key) ? 1 : 0.4 }}>
+                        <div style={{ fontSize: 14 }}>{label}</div>
+                        {sub && <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2 }}>{sub}</div>}
+                    </div>
+                </li>
+            );
+
+            const reportText = buildReport();
+            const hasAnything = completedTasks.length + meetingsAndVisits.length + opportunityUpdates.length + notes.length + nextWeekPlan.length > 0;
+
+            return (
+                <div>
+                    <div className="page-title">Weekly Report</div>
+                    <div style={{ fontSize: 14, color: 'var(--color-muted)', marginBottom: 20 }}>
+                        Mon-Fri this week ({rangeLabel}). Uncheck items you do not want to include, then Copy.
+                    </div>
+                    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <div style={{ flex: '1 1 480px', minWidth: 0 }}>
+                            {completedTasks.length > 0 && (
+                                <div className="section">
+                                    <div className="section-title">Tasks Completed ({completedTasks.length})</div>
+                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                        {completedTasks.map(t => itemRow(
+                                            `task-${t.id}`,
+                                            t.description,
+                                            `${t.type || ''} - Completed ${t.completedAt ? new Date(t.completedAt).toLocaleDateString() : ''} ${t.accountId ? '- ' + getAccountName(t.accountId) : ''}`
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {meetingsAndVisits.length > 0 && (
+                                <div className="section">
+                                    <div className="section-title">Meetings & Visits ({meetingsAndVisits.length})</div>
+                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                        {meetingsAndVisits.map(a => itemRow(
+                                            `meeting-${a.id}`,
+                                            a.description,
+                                            `${new Date(a.date).toLocaleDateString()} - ${a.type} ${a.accountId ? '- ' + getAccountName(a.accountId) : ''} ${a.contactId ? '- ' + getContactName(a.contactId) : ''}`
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {opportunityUpdates.length > 0 && (
+                                <div className="section">
+                                    <div className="section-title">Opportunity Developments ({opportunityUpdates.length})</div>
+                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                        {opportunityUpdates.map(o => itemRow(
+                                            `opp-${o.id}`,
+                                            o.name,
+                                            `${o.stage} ${o.value ? '- $' + o.value.toLocaleString() : ''}`
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {notes.length > 0 && (
+                                <div className="section">
+                                    <div className="section-title">Notes ({notes.length})</div>
+                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                        {notes.map(a => itemRow(
+                                            `note-${a.id}`,
+                                            a.description,
+                                            `${new Date(a.date).toLocaleDateString()} ${a.accountId ? '- ' + getAccountName(a.accountId) : ''}`
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {nextWeekPlan.length > 0 && (
+                                <div className="section">
+                                    <div className="section-title">Next Week Plan ({nextWeekPlan.length})</div>
+                                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                        {nextWeekPlan.map(t => itemRow(
+                                            `plan-${t.id}`,
+                                            t.description,
+                                            `Due ${t.dueDate ? new Date(t.dueDate).toLocaleDateString() : ''} ${t.accountId ? '- ' + getAccountName(t.accountId) : ''}`
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {!hasAnything && (
+                                <div className="section">
+                                    <div className="empty-state">
+                                        <div>Nothing logged for this week yet.</div>
+                                        <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 8 }}>
+                                            Complete tasks, log meetings/notes, and update opportunities - they will show up here.
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ flex: '0 0 420px', position: 'sticky', top: 20 }}>
+                            <div className="section">
+                                <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>Preview</span>
+                                    <button className="btn small" onClick={copyToClipboard}>
+                                        {copied ? 'Copied!' : 'Copy to clipboard'}
+                                    </button>
+                                </div>
+                                <pre style={{
+                                    whiteSpace: 'pre-wrap',
+                                    fontFamily: 'var(--font-sans)',
+                                    fontSize: 13,
+                                    lineHeight: 1.5,
+                                    background: 'var(--color-surface-soft)',
+                                    padding: 14,
+                                    borderRadius: 'var(--radius-sm)',
+                                    border: '1px solid var(--color-divider)',
+                                    maxHeight: '70vh',
+                                    overflowY: 'auto',
+                                    margin: 0
+                                }}>{reportText || '(Nothing selected.)'}</pre>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             );
         };
